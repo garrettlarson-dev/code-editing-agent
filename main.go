@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -41,13 +42,53 @@ func main() {
 		return scanner.Text(), true
 	}
 
-	tools := []ToolDefinition{ReadFileDefinition, ListFilesDefinition, EditFileDefinition}
+	tools := []ToolDefinition{ReadFileDefinition, ListFilesDefinition, EditFileDefinition, FormatWithPrettierDefinition}
 	agent := NewAgent(&client, getUserMessage, tools)
 
 	err := agent.Run(context.TODO())
 	if err != nil {
 		fmt.Printf("Error: %s\n", err.Error())
 	}
+}
+// FormatWithPrettier tool definition
+var FormatWithPrettierDefinition = ToolDefinition{
+	Name:        "format_with_prettier",
+	Description: "Format a file using Prettier. Provide the relative path to a code file (e.g., .js, .ts, .json). Returns the formatted code or error.",
+	InputSchema: FormatWithPrettierInputSchema,
+	Function:    FormatWithPrettier,
+}
+
+type FormatWithPrettierInput struct {
+	Path string `json:"path" jsonschema_description:"Relative path to the file to format with Prettier."`
+}
+
+var FormatWithPrettierInputSchema = GenerateSchema[FormatWithPrettierInput]()
+
+
+func FormatWithPrettier(input json.RawMessage) (string, error) {
+	var in FormatWithPrettierInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", err
+	}
+	if in.Path == "" {
+		return "", errors.New("path is required")
+	}
+	p, err := safePath(in.Path)
+	if err != nil {
+		return "", err
+	}
+	// Run prettier via exec
+	cmd := exec.Command("prettier", "--write", p)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("prettier error: %s\n%s", err.Error(), string(out))
+	}
+	// Return the formatted file contents
+	formatted, err := os.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	return string(formatted), nil
 }
 
 func NewAgent(
